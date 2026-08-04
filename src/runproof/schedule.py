@@ -106,14 +106,26 @@ class Health:
     def _ago(cls, seconds: float) -> str:
         """How long ago, in a unit that is not absurd for the interval.
 
-        Rounding everything to minutes printed `last tick 0 minutes ago`
-        immediately after a tick, one line above `last tick 0 seconds ago`
-        from the report. Two different wordings for the same number, and the
-        one in the summary reads like the clock has stopped.
+        Two bugs live here. Rounding everything to minutes printed `last tick
+        0 minutes ago` immediately after a tick, one line above `0 seconds
+        ago` from the report -- two wordings of one number, and the summary's
+        read like the clock had stopped. At the other end it printed `last
+        ticked 2880 minutes ago`, which is arithmetically perfect and makes
+        the reader do the division. The number somebody needs from a dead
+        scheduler at 9am is "two days", not four significant figures.
         """
+        return cls._span(seconds) + " ago"
+
+    @classmethod
+    def _span(cls, seconds: float) -> str:
+        """The same ladder, for a duration that is not in the past."""
         if seconds < 90:
-            return cls._plural(round(seconds), "second") + " ago"
-        return cls._plural(round(seconds / 60), "minute") + " ago"
+            return cls._plural(round(seconds), "second")
+        if seconds < 5400:
+            return cls._plural(round(seconds / 60), "minute")
+        if seconds < 172800:
+            return cls._plural(round(seconds / 3600), "hour")
+        return cls._plural(round(seconds / 86400), "day")
 
     def summary(self) -> str:
         if self.last_tick is None:
@@ -135,7 +147,7 @@ class Health:
                 f"{late} of {self._plural(self.total_schedules, 'schedule')} {verb} overdue."
             )
         if self.overdue:
-            worst = self._plural(round(max(s.overdue_by() for s in self.overdue) / 60), "minute")
+            worst = self._span(max(s.overdue_by() for s in self.overdue))
             return (
                 f"the scheduler is alive (last tick {ago}) but "
                 f"{self._plural(late, 'schedule')} {verb} overdue, the worst by {worst}."

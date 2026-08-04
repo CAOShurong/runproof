@@ -42,6 +42,11 @@ First release.
 - `runproof doctor`, which answers "did the overnight work run, and if not, why
   not?" in facts with numbers attached, and exits non-zero so it can be a
   one-line monitoring check.
+- `runproof dashboard`, a self-contained HTML summary — inline CSS, no script,
+  nothing fetched — that leads with **what is not happening**: schedules that
+  stopped firing and runs that went quiet appear even though they have nothing
+  to put in a table. Pass rate per job is over every attempt ever recorded, not
+  the last result.
 - `status`, `show`, `prune`, `schedule add|list|remove`, and `--json` on all of
   them.
 - Exit codes that distinguish `1` (ran fine, work not acceptable) from `2`

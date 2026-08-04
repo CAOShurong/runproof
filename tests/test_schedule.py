@@ -214,9 +214,14 @@ def test_a_fresh_tick_is_not_reported_as_zero_minutes_ago(scheduled):
     assert "second" in summary
 
 
-def test_a_long_gap_is_still_reported_in_minutes(scheduled):
+def test_a_long_gap_climbs_to_hours_and_days(scheduled):
+    """`last ticked 2880 minutes ago` is arithmetically perfect and makes the
+    reader do the division. At 9am the useful answer is 'two days'."""
     repo, _ = scheduled
     now = time.time()
-    with Scheduler(repo) as scheduler:
-        scheduler.record_tick(now=now - 3 * 3600)
-    assert "180 minutes ago" in doctor(repo, now=now).summary()
+    # Oldest first: liveness reads MAX(at), so a tick inserted behind the
+    # newest one would not move the answer.
+    for gap, expected in ((2 * 86400, "2 days ago"), (3 * 3600, "3 hours ago")):
+        with Scheduler(repo) as scheduler:
+            scheduler.record_tick(now=now - gap)
+        assert expected in doctor(repo, now=now).summary()

@@ -256,6 +256,95 @@ def heartbeat_history(root: str):
 # --------------------------------------------------------------------------
 
 
+def dashboard_sample(root: str) -> str:
+    """A deterministic dashboard, written to `docs/dashboard.html`.
+
+    Every timestamp is supplied rather than taken from the clock, and the
+    repository path is normalised afterwards, so the committed file is
+    byte-stable and `--check` can hold it to the same standard as the README.
+    Without that it would drift on every regeneration and the check would be
+    trained away within a week.
+
+    The shape it illustrates is the one worth illustrating: a job that passes
+    most of the time but not always, a job that has never passed, and a
+    schedule that stopped firing -- which is the state a dashboard exists to
+    make visible and the one it is most tempted to render as an empty page.
+    """
+    from runproof.dashboard import render_dashboard
+    from runproof.store import Store
+
+    day = 86400.0
+    now = EVENING + 3 * day
+    # (job, trigger, results oldest-first, when the newest one ran)
+    fixture = [
+        (
+            "nightly-typing",
+            "schedule",
+            [True, True, False, True, True, True, True, False, True],
+            now - day,
+        ),
+        ("upgrade-requests", "manual", [False, False, False], now - 3 * HOUR),
+    ]
+
+    spec = os.path.join(root, "nightly.yaml")
+    with open(spec, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(spec_text("nightly-typing", 'python -c "pass"', ""))
+    job = parse_job(spec_text("nightly-typing", 'python -c "pass"', ""))
+
+    with Store.for_repository(root) as store:
+        for name, trigger, results, newest in fixture:
+            # Spaced backwards from the newest, so nothing lands in the future
+            # -- the first version ran the second job forward from where the
+            # first stopped and produced four runs stamped "0s ago" that were
+            # actually tomorrow.
+            step = day if trigger == "schedule" else HOUR
+            clock = newest - (len(results) - 1) * step - step
+            for passed in results:
+                clock += step
+                run_job_row = store.start_run(
+                    type(job)(**{**job.__dict__, "name": name}), trigger=trigger, now=clock
+                )
+                attempt = store.start_attempt(run_job_row, 1, now=clock)
+                store.record_check(attempt, "run", passed, "`python -m pytest -q`", now=clock)
+                store.finish_attempt(
+                    attempt,
+                    "passed" if passed else "rejected",
+                    branch=f"runproof/{name}-1-abc123",
+                    files_changed=2,
+                    diff_lines=48,
+                    detail="1 of 1 checks passed"
+                    if passed
+                    else "1 of 1 checks failed: `python -m pytest -q` exit 1: "
+                    "FAILED tests/test_client.py::test_retry",
+                    now=clock + 90,
+                )
+                store.finish_run(
+                    run_job_row,
+                    "passed" if passed else "failed",
+                    "the single attempt passed"
+                    if passed
+                    else "the single attempt was rejected: 1 of 1 checks failed",
+                    now=clock + 90,
+                )
+
+    # A schedule that stopped firing: registered, ticked once, then silence.
+    with Scheduler(root) as scheduler:
+        scheduler.add(spec, every_seconds=int(day), now=now - 2 * day)
+        scheduler.record_tick(now=now - 2 * day)
+
+    page = render_dashboard(root, now=now)
+    # The only substitution. The real path is a temporary directory whose name
+    # changes every run, and a sample that changes every run is a sample the
+    # check cannot hold to anything.
+    return page.replace(_e_path(root), "~/work/example")
+
+
+def _e_path(root: str) -> str:
+    import html as _html
+
+    return _html.escape(root, quote=True)
+
+
 def _font(size: int):
     from PIL import ImageFont
 
@@ -474,6 +563,20 @@ a worse morning than the one it was recovering from.
 {END}"""
 
 
+def _write_or_compare(path: str, content: str, check: bool) -> str | None:
+    """Write a generated file, or report that the committed one has drifted."""
+    if not check:
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+        return None
+    if not os.path.isfile(path):
+        return f"{os.path.basename(path)} is missing. Run: python docs/build_docs.py"
+    with open(path, encoding="utf-8") as handle:
+        if handle.read() != content:
+            return f"{os.path.basename(path)} is out of date. Run: python docs/build_docs.py"
+    return None
+
+
 def check_test_count() -> str | None:
     """Whether the test count quoted in the README is still true.
 
@@ -509,10 +612,16 @@ def build(check: bool) -> int:
         example_repository(clock)
         history = heartbeat_history(clock)
 
+        board = os.path.join(workspace, "board")
+        example_repository(board)
+        page = dashboard_sample(board)
+
         target = workspace if check else HERE
         figure_gate(outcomes, os.path.join(target, "gate.png"))
         figure_heartbeat(history, os.path.join(target, "heartbeat.png"))
         section = generated_section(outcomes, history)
+
+    stale_dashboard = _write_or_compare(os.path.join(HERE, "dashboard.html"), page, check)
 
     readme_path = os.path.join(ROOT, "README.md")
     with open(readme_path, encoding="utf-8") as handle:
@@ -530,11 +639,11 @@ def build(check: bool) -> int:
         if rebuilt != readme:
             print("README.md is out of date. Run: python docs/build_docs.py", file=sys.stderr)
             return 1
-        stale = check_test_count()
-        if stale:
-            print(stale, file=sys.stderr)
-            return 1
-        print("README.md is up to date.")
+        for stale in (stale_dashboard, check_test_count()):
+            if stale:
+                print(stale, file=sys.stderr)
+                return 1
+        print("README.md and docs/dashboard.html are up to date.")
         return 0
 
     with open(readme_path, "w", encoding="utf-8", newline="\n") as handle:

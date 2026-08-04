@@ -74,6 +74,9 @@ def _parser() -> argparse.ArgumentParser:
     show.add_argument("run_id", type=int)
 
     sub.add_parser("prune", help="clear worktrees an interrupted run left behind")
+
+    board = sub.add_parser("dashboard", help="write a self-contained HTML summary")
+    board.add_argument("--output", help="where to write it (default .runproof/dashboard.html)")
     return parser
 
 
@@ -158,6 +161,17 @@ def _dispatch(args, root: str, style: dict) -> int:
         else:
             print(json.dumps(payload, indent=2, default=str))
         return EXIT_OK if run.state == "passed" else EXIT_REJECTED
+
+    if args.command == "dashboard":
+        from .dashboard import build_dashboard
+
+        path = build_dashboard(root, output=args.output)
+        _emit(
+            {"path": path},
+            f"Wrote {path}\nOne file, no network. Open it, or attach it to a bug report.",
+            args.json,
+        )
+        return EXIT_OK
 
     if args.command == "prune":
         removed = prune_stale(root)
