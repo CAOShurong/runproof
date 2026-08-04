@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+# Local run database and artifacts produced by using the tool on itself.
+.runproof/
+
+# Working notes for unattended sessions: real, but not part of the package.
+DESIGN.md
+NIGHT-LOG.md
