@@ -263,14 +263,27 @@ def _parse_mapping(lines, index: int, indent: int):
 
 
 def _parse_block_scalar(lines, index: int, indent: int) -> tuple[str, int]:
-    collected = []
+    """Collect a ``|`` block, preserving indentation *relative to the block*.
+
+    Lines are stripped during pre-parsing, so the original leading spaces have
+    to be rebuilt from the recorded indent. Missing that made every block
+    scalar left-align, which silently destroyed any prompt containing code --
+    found by writing a prompt with an indented function body and watching it
+    come back flat. For a tool whose entire input is prompts, that is not a
+    cosmetic bug.
+    """
+    collected: list[tuple[int, str]] = []
     while index < len(lines):
-        number, own_indent, content = lines[index]
+        _, own_indent, content = lines[index]
         if own_indent <= indent:
             break
-        collected.append(content)
+        collected.append((own_indent, content))
         index += 1
-    return "\n".join(collected) + "\n" if collected else "", index
+    if not collected:
+        return "", index
+    base = min(depth for depth, _ in collected)
+    body = "\n".join(" " * (depth - base) + content for depth, content in collected)
+    return body + "\n", index
 
 
 # --------------------------------------------------------------------------
