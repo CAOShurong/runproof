@@ -169,11 +169,16 @@ def _bounds(check: Check, actual: int, noun: str) -> CheckResult:
     return CheckResult(check.kind, True, f"{actual} {noun}, within {bound}", check.describe())
 
 
+def _noun(count: int, singular: str) -> str:
+    """`1 file changed`, not `1 files changed`."""
+    return f"{singular} changed" if count == 1 else f"{singular}s changed"
+
+
 def _structural(check: Check, diff: DiffStat) -> CheckResult:
     if check.kind == "changed_files":
-        return _bounds(check, diff.files_changed, "files changed")
+        return _bounds(check, diff.files_changed, _noun(diff.files_changed, "file"))
     if check.kind == "diff_lines":
-        return _bounds(check, diff.lines, "lines changed")
+        return _bounds(check, diff.lines, _noun(diff.lines, "line"))
 
     if check.kind == "must_not_touch":
         offenders = [(p, m) for p in diff.paths if (m := _matches_any(p, check.value))]

@@ -82,6 +82,11 @@ class RunOutcome:
         if not self.attempts:
             return "no attempts ran"
         if self.passed_count == len(self.attempts):
+            if len(self.attempts) == 1:
+                # Worth its own sentence rather than "all 1 attempts passed":
+                # a single green attempt is the weakest evidence this tool
+                # produces, and the wording should not dress it up.
+                return "the single attempt passed"
             return f"all {len(self.attempts)} attempts passed"
         if self.passed_count == 0:
             first = self.attempts[0]
