@@ -42,7 +42,7 @@ __all__ = ["Attempt", "Run", "Store", "StoreError"]
 
 #: Bumped whenever the schema changes. `_MIGRATIONS` must gain a matching
 #: entry, and old databases are upgraded on open.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: A run whose heartbeat is older than this is presumed dead. Generous on
 #: purpose: an agent can legitimately think for minutes without writing
@@ -97,7 +97,34 @@ _MIGRATIONS = [
         recorded_at REAL    NOT NULL
     );
     CREATE INDEX check_attempt ON check_results (attempt_id);
+    """,
+    # 1 -> 2: schedules, and the scheduler's own pulse.
+    #
+    # `ticks` exists because of the failure this project is named after. The
+    # scheduler stopped dispatching and nothing recorded that it had; the only
+    # evidence available afterwards was that tasks had no `lastRunAt`, which
+    # is indistinguishable from "never scheduled". A row written on every wake
+    # -- whether or not anything was due -- turns "the scheduler is dead" from
+    # an inference into a lookup.
     """
+    CREATE TABLE schedules (
+        job          TEXT PRIMARY KEY,
+        spec_path    TEXT NOT NULL,
+        every_seconds INTEGER NOT NULL,
+        enabled      INTEGER NOT NULL DEFAULT 1,
+        next_due     REAL NOT NULL,
+        last_dispatch REAL,
+        created_at   REAL NOT NULL
+    );
+
+    CREATE TABLE ticks (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        at         REAL NOT NULL,
+        dispatched INTEGER NOT NULL DEFAULT 0,
+        note       TEXT
+    );
+    CREATE INDEX ticks_at ON ticks (at DESC);
+    """,
 ]
 
 
