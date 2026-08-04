@@ -1,7 +1,6 @@
 # runproof
 
 [![CI](https://github.com/CAOShurong/runproof/actions/workflows/ci.yml/badge.svg)](https://github.com/CAOShurong/runproof/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/runproof)](https://pypi.org/project/runproof/)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)](https://pypi.org/project/runproof/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)](pyproject.toml)
