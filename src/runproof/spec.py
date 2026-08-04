@@ -163,8 +163,14 @@ def _value(text: str, line: int):
 
 
 def _indent(raw: str) -> int:
-    stripped = raw.lstrip(" ")
-    if raw[: len(raw) - len(stripped)].count("\t"):
+    """Leading spaces, refusing tabs.
+
+    The first version stripped only spaces before looking for tabs, so a line
+    that *began* with a tab had an empty prefix and the check never fired --
+    the one input it existed to catch.
+    """
+    stripped = raw.lstrip(" \t")
+    if "\t" in raw[: len(raw) - len(stripped)]:
         raise SpecError("tabs are not valid indentation in YAML")
     return len(raw) - len(stripped)
 
@@ -232,12 +238,24 @@ def _parse_sequence(lines, index: int, indent: int):
 
 def _parse_mapping(lines, index: int, indent: int):
     result: dict = {}
+    level: int | None = None
     while index < len(lines):
         number, own_indent, content = lines[index]
         if own_indent < indent:
             break
-        if own_indent > indent and result:
+        # `indent` is the *minimum* depth these keys may sit at, not their
+        # exact depth: a nested block is entered with `parent + 1` because the
+        # real indentation is unknown until the first key appears. So the
+        # first key fixes the level and siblings must match it. Comparing
+        # every line against the minimum instead rejected the second key of
+        # any nested mapping -- `limits:` with two entries under it, which is
+        # the most ordinary shape a spec can have.
+        if level is None:
+            level = own_indent
+        elif own_indent > level:
             raise SpecError("unexpected indentation", number)
+        elif own_indent < level:
+            break
         match = _KEY.match(content)
         if not match:
             if _ITEM.match(content):
