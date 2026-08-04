@@ -11,7 +11,6 @@ worth distrusting. They are weighted at three things:
 """
 
 import os
-import subprocess
 
 import pytest
 
@@ -19,7 +18,7 @@ from conftest import APPEND_SUB, BREAK_TESTS, TOUCH_CI, git, spec_text
 from runproof.runner import run_job
 from runproof.spec import parse_job
 from runproof.store import Store
-from runproof.verify import Verdict, verify
+from runproof.verify import SUMMARY_DETAIL, Verdict, verify
 from runproof.worktree import Worktree, WorktreeError, repository_root
 
 
@@ -177,7 +176,9 @@ def test_an_empty_verdict_is_not_a_pass():
 
 
 def test_a_good_job_passes_every_attempt(repo):
-    job = parse_job(spec_text("good", APPEND_SUB, attempts=2, extra_checks='  - must_touch: ["app.py"]\n'))
+    job = parse_job(
+        spec_text("good", APPEND_SUB, attempts=2, extra_checks='  - must_touch: ["app.py"]\n')
+    )
     outcome = run_job(job, root=repo)
     assert outcome.state == "passed"
     assert outcome.rate == "2/2"
@@ -232,3 +233,23 @@ def test_repository_root_finds_the_top_from_a_subdirectory(repo):
     nested = os.path.join(repo, "a", "b")
     os.makedirs(nested)
     assert os.path.normpath(repository_root(nested)) == os.path.normpath(repo)
+
+
+def test_a_single_rejected_attempt_is_not_reported_as_a_tally(repo):
+    """`0 of 1 attempts passed` is the same plural slip as the pass side, and
+    it reads as arithmetic when there is nothing to count."""
+    outcome = run_job(parse_job(spec_text("bad", BREAK_TESTS)), root=repo)
+    assert outcome.summary().startswith("the single attempt was rejected")
+    assert "0 of 1 attempts" not in outcome.summary()
+
+
+def test_the_headline_does_not_recite_the_whole_failure(repo):
+    """A rejected run printed the full pytest transcript twice -- once in the
+    headline and once under the check that produced it, three lines below."""
+    outcome = run_job(parse_job(spec_text("bad", BREAK_TESTS)), root=repo)
+    verdict = outcome.attempts[0].verdict
+    failure = verdict.failures[0]
+    assert len(failure.detail) > SUMMARY_DETAIL, "fixture no longer produces a long failure"
+    assert len(verdict.summary()) < len(failure.detail)
+    # Still says enough to act on without opening anything.
+    assert "test_add" in verdict.summary()

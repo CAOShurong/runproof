@@ -1,0 +1,102 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "runproof"
+dynamic = ["version"]
+description = "Run coding-agent work unattended in an isolated git worktree, and refuse to accept it unless it passes the checks you declared."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Shurong Cao", email = "shurongcao2026@gmail.com" }]
+keywords = [
+    "ai-agent",
+    "coding-agent",
+    "claude-code",
+    "codex",
+    "autonomous",
+    "unattended",
+    "verification",
+    "git-worktree",
+    "scheduler",
+    "llm",
+    "agent-harness",
+    "developer-tools",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Utilities",
+]
+# No runtime dependencies, on purpose, and the one that would be obvious is
+# PyYAML. A tool you reach for because an overnight run failed should not be
+# able to fail to install. What is given up instead -- a deliberately small
+# YAML subset that refuses everything outside it -- is argued in
+# src/runproof/spec.py, at length, because it is a real trade and not a free
+# win. git is the only external requirement, and it is not optional: isolation
+# is the feature.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/CAOShurong/runproof"
+Repository = "https://github.com/CAOShurong/runproof"
+Issues = "https://github.com/CAOShurong/runproof/issues"
+Changelog = "https://github.com/CAOShurong/runproof/blob/main/CHANGELOG.md"
+
+[project.scripts]
+runproof = "runproof.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.6"]
+# Only for docs/build_docs.py, which renders the README figures from a real
+# run. Never imported by the package itself.
+docs = ["pillow>=10"]
+
+[tool.hatch.version]
+path = "src/runproof/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/runproof"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "examples", "README.md", "LICENSE", "CHANGELOG.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src", "tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests hold spec fixtures as literal YAML, and the shape is the point.
+#
+# SIM115: `open(path).read()` inside an assertion is the readable form for a
+# one-line "the file still says what it said". Wrapping each in a `with` would
+# triple the length of the assertions that check the user's tree was not
+# written to, which are the ones that most need to be read at a glance.
+#
+# SIM117: two nested worktree context managers is the regression test for
+# branch-name collision. Collapsing them onto one line hides what is being
+# tested -- that two *simultaneously live* worktrees do not clash.
+"tests/*" = ["E501", "SIM115", "SIM117"]
+# The docs builder holds the example repository as literal file contents.
+"docs/*" = ["E501"]

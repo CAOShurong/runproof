@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests must pass before anything is published
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Give git an identity to commit with
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pytest -q
+
+  build:
+    name: Build, and check the tag says what the package says
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip build twine
+
+      # Publishing 0.1.0 from a tag reading v0.2.0 is unrecoverable: the
+      # version is burned on PyPI and cannot be reused. Cheaper to fail here.
+      - name: The tag and the package version must agree
+        run: |
+          python - <<'PY'
+          import os, re, sys
+
+          source = open("src/runproof/__init__.py", encoding="utf-8").read()
+          version = re.search(r'__version__ = "([^"]+)"', source).group(1)
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          if version != tag:
+              sys.exit(f"tag {tag!r} does not match __version__ {version!r}")
+          print(f"tag and package agree on {version}")
+          PY
+
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted publishing: no API token is stored anywhere. This requires a
+    # pending publisher to have been registered on PyPI *before* the first tag
+    # -- owner CAOShurong, repository runproof, workflow release.yml,
+    # environment pypi. Without it the job fails at the very last step, after
+    # everything else has passed, which is a miserable way to find out. It is
+    # also matched on the owner *name*, so renaming the account breaks it.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/runproof
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

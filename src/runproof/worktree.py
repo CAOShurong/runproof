@@ -173,7 +173,7 @@ class Worktree:
             _git(["branch", "-D", self.branch], cwd=self.root)
         self.path = None
 
-    def __enter__(self) -> "Worktree":
+    def __enter__(self) -> Worktree:
         self.create()
         return self
 

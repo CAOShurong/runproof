@@ -22,8 +22,6 @@ up standing in for evidence.
 from __future__ import annotations
 
 import json
-import os
-import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -112,8 +110,15 @@ class ClaudeAdapter:
         return shutil.which("claude") is not None
 
     def _command(self, job) -> list[str]:
-        command = ["claude", "-p", job.prompt, "--output-format", "json",
-                   "--permission-mode", self.permission_mode]
+        command = [
+            "claude",
+            "-p",
+            job.prompt,
+            "--output-format",
+            "json",
+            "--permission-mode",
+            self.permission_mode,
+        ]
         if self.model:
             command += ["--model", self.model]
         return command
@@ -173,11 +178,17 @@ def _parse_claude_json(text: str):
     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
     tokens = None
     if usage:
-        counted = [usage.get(k) for k in ("input_tokens", "output_tokens") if isinstance(usage.get(k), int)]
+        counted = [
+            usage.get(key)
+            for key in ("input_tokens", "output_tokens")
+            if isinstance(usage.get(key), int)
+        ]
         tokens = sum(counted) if counted else None
     cost = payload.get("total_cost_usd") or payload.get("cost_usd")
-    return (summary if isinstance(summary, str) else str(summary)), tokens, (
-        float(cost) if isinstance(cost, (int, float)) else None
+    return (
+        (summary if isinstance(summary, str) else str(summary)),
+        tokens,
+        (float(cost) if isinstance(cost, (int, float)) else None),
     )
 
 

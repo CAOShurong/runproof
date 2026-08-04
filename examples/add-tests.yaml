@@ -1,0 +1,27 @@
+# Asking for tests is the case where "the suite is green" proves nothing --
+# it was green before. So the checks here assert that work was *done*, not
+# merely that nothing broke:
+#
+#   must_touch      the file that was supposed to gain tests actually changed
+#   changed_files   min 1, so an agent that decided the coverage was fine
+#                   already is rejected rather than congratulated
+#   diff_lines      min 30, because three lines is not a test suite
+#
+# This is the shape to copy whenever the job is additive.
+name: cover-parser
+prompt: |
+  The module `src/app/parser.py` has no tests. Write them in
+  `tests/test_parser.py`, covering the error paths as well as the happy one.
+
+  Do not change `src/app/parser.py` itself. If a test reveals a bug, leave the
+  test failing and say so.
+adapter: claude
+attempts: 2
+checks:
+  - run: python -m pytest -q
+  - must_touch: ["tests/test_parser.py"]
+  - must_not_touch: ["src/app/parser.py"]
+  - changed_files: {min: 1, max: 3}
+  - diff_lines: {min: 30, max: 600}
+limits:
+  wall_seconds: 1200

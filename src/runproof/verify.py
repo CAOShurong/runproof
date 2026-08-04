@@ -48,6 +48,11 @@ _STRUCTURAL = ("changed_files", "diff_lines", "must_not_touch", "must_touch")
 #: failures is still readable.
 QUOTED_LINES = 12
 
+#: How much of a failing check's detail the one-line summary carries. Long
+#: enough to name the failing test and its assertion, short enough that
+#: `runproof status` stays a table.
+SUMMARY_DETAIL = 120
+
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -91,13 +96,25 @@ class Verdict:
         return [r for r in self.results if not r.passed]
 
     def summary(self) -> str:
+        """One line. The full detail belongs to the check, not to the headline.
+
+        The first version pasted the whole quoted failure in here, which meant
+        a rejected run printed a twelve-line pytest transcript twice: once in
+        the headline and once, three lines below, under the check that
+        produced it. The headline's job is to say which check and roughly
+        why; `SUMMARY_DETAIL` is enough for the assertion and not enough for
+        the traceback.
+        """
         if not self.results:
             return "no checks ran, so nothing was verified"
         if self.passed:
             return f"{len(self.results)} of {len(self.results)} checks passed"
         first = self.failures[0]
         more = f", and {len(self.failures) - 1} more" if len(self.failures) > 1 else ""
-        return f"{len(self.failures)} of {len(self.results)} checks failed: {first.detail}{more}"
+        detail = first.detail
+        if len(detail) > SUMMARY_DETAIL:
+            detail = detail[:SUMMARY_DETAIL].rstrip() + " ..."
+        return f"{len(self.failures)} of {len(self.results)} checks failed: {detail}{more}"
 
     def as_dict(self) -> dict:
         return {
@@ -156,17 +173,26 @@ def _matches_any(path: str, patterns) -> str | None:
     return None
 
 
+def _result(check: Check, passed: bool, detail: str) -> CheckResult:
+    """A result that carries the requirement it was judged against.
+
+    Threading `check.describe()` through every call site by hand is how one of
+    them ends up without it, and a verdict that does not restate what was
+    required is half a report -- the reader has to go and open the spec to
+    learn what `3 files changed` was measured against.
+    """
+    return CheckResult(check.kind, passed, detail, check.describe())
+
+
 def _bounds(check: Check, actual: int, noun: str) -> CheckResult:
     limits = dict(check.value)
     low, high = limits.get("min"), limits.get("max")
     if high is not None and actual > high:
-        return CheckResult(check.kind, False, f"{actual} {noun}, limit was {high}", check.describe())
+        return _result(check, False, f"{actual} {noun}, limit was {high}")
     if low is not None and actual < low:
-        return CheckResult(
-            check.kind, False, f"only {actual} {noun}, at least {low} required", check.describe()
-        )
+        return _result(check, False, f"only {actual} {noun}, at least {low} required")
     bound = f"max {high}" if high is not None else f"min {low}"
-    return CheckResult(check.kind, True, f"{actual} {noun}, within {bound}", check.describe())
+    return _result(check, True, f"{actual} {noun}, within {bound}")
 
 
 def _noun(count: int, singular: str) -> str:
@@ -184,18 +210,14 @@ def _structural(check: Check, diff: DiffStat) -> CheckResult:
         offenders = [(p, m) for p in diff.paths if (m := _matches_any(p, check.value))]
         if offenders:
             named = ", ".join(f"{path} (matched {pattern!r})" for path, pattern in offenders[:4])
-            return CheckResult(check.kind, False, f"modified {named}", check.describe())
-        return CheckResult(
-            check.kind, True, f"none of {len(diff.paths)} changed paths matched", check.describe()
-        )
+            return _result(check, False, f"modified {named}")
+        return _result(check, True, f"none of {len(diff.paths)} changed paths matched")
 
     # must_touch
     missing = [p for p in check.value if not any(_matches_any(path, [p]) for path in diff.paths)]
     if missing:
-        return CheckResult(
-            check.kind, False, f"nothing matched {', '.join(missing)}", check.describe()
-        )
-    return CheckResult(check.kind, True, "every required path was modified", check.describe())
+        return _result(check, False, f"nothing matched {', '.join(missing)}")
+    return _result(check, True, "every required path was modified")
 
 
 def _run_check(check: Check, worktree: Worktree, timeout: int) -> CheckResult:
@@ -203,33 +225,27 @@ def _run_check(check: Check, worktree: Worktree, timeout: int) -> CheckResult:
     try:
         result = worktree.run(command, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return CheckResult(
-            check.kind, False, f"`{command}` did not finish within {timeout}s", check.describe()
-        )
+        return _result(check, False, f"`{command}` did not finish within {timeout}s")
     except OSError as error:
         # The command could not be started at all. Not a skip: an attempt
         # whose verification could not run has not been shown to work.
-        return CheckResult(check.kind, False, f"`{command}` could not run: {error}", check.describe())
-    if result.returncode != 0:
-        return CheckResult(check.kind, False, f"`{command}` {_quote_output(result)}", check.describe())
-    return CheckResult(check.kind, True, f"`{command}` {_quote_output(result)}", check.describe())
+        return _result(check, False, f"`{command}` could not run: {error}")
+    return _result(check, result.returncode == 0, f"`{command}` {_quote_output(result)}")
 
 
 def _file_contains(check: Check, worktree: Worktree) -> CheckResult:
     spec = dict(check.value) if isinstance(check.value, dict) else {}
     path, needle = spec.get("path"), spec.get("text")
     if not path or needle is None:
-        return CheckResult(
-            check.kind, False, "check needs {path: ..., text: ...}", check.describe()
-        )
+        return _result(check, False, "check needs {path: ..., text: ...}")
     full = os.path.join(worktree.path or "", path)
     if not os.path.isfile(full):
-        return CheckResult(check.kind, False, f"{path} does not exist", check.describe())
+        return _result(check, False, f"{path} does not exist")
     with open(full, encoding="utf-8", errors="replace") as handle:
         content = handle.read()
     if needle in content:
-        return CheckResult(check.kind, True, f"{path} contains {needle!r}", check.describe())
-    return CheckResult(check.kind, False, f"{path} does not contain {needle!r}", check.describe())
+        return _result(check, True, f"{path} contains {needle!r}")
+    return _result(check, False, f"{path} does not contain {needle!r}")
 
 
 def verify(job: Job, worktree: Worktree, timeout: int | None = None) -> Verdict:
@@ -253,10 +269,7 @@ def verify(job: Job, worktree: Worktree, timeout: int | None = None) -> Verdict:
         for check in job.checks:
             if check.kind not in _STRUCTURAL:
                 verdict.results.append(
-                    CheckResult(
-                        check.kind, False, "not run: a structural check already failed",
-                        check.describe(),
-                    )
+                    _result(check, False, "not run: a structural check already failed")
                 )
         return verdict
 

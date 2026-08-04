@@ -45,18 +45,16 @@ def test_an_invalid_spec_is_refused_when_scheduled_not_at_3am(scheduled, tmp_pat
     repo, _ = scheduled
     broken = tmp_path / "broken.yaml"
     broken.write_text("name: x\nprompt: p\nchekcs:\n  - run: pytest\n", encoding="utf-8")
-    with Scheduler(repo) as scheduler:
-        with pytest.raises(Exception, match="chekcs"):
-            scheduler.add(str(broken), every_seconds=3600)
+    with Scheduler(repo) as scheduler, pytest.raises(Exception, match="chekcs"):
+        scheduler.add(str(broken), every_seconds=3600)
 
 
 def test_an_absurdly_short_interval_is_refused(scheduled):
     """A runaway schedule spawns agents in a loop, which is expensive in a way
     that a typo should not be."""
     repo, spec = scheduled
-    with Scheduler(repo) as scheduler:
-        with pytest.raises(ValueError, match="typo"):
-            scheduler.add(spec, every_seconds=MIN_INTERVAL_SECONDS - 1)
+    with Scheduler(repo) as scheduler, pytest.raises(ValueError, match="typo"):
+        scheduler.add(spec, every_seconds=MIN_INTERVAL_SECONDS - 1)
 
 
 def test_nothing_is_due_before_its_time(scheduled):
@@ -148,9 +146,7 @@ def test_a_backlog_is_caught_up_once_not_n_times(scheduled):
         outcomes = scheduler.tick(now=now + 6 * 3600)
         assert len(outcomes) == 1
         # The skipped windows are recorded rather than silently forgotten.
-        notes = scheduler._connection.execute(
-            "SELECT note FROM ticks WHERE note != ''"
-        ).fetchall()
+        notes = scheduler._connection.execute("SELECT note FROM ticks WHERE note != ''").fetchall()
         assert any("missed" in row["note"] for row in notes)
 
 
@@ -188,13 +184,39 @@ def test_removing_a_schedule_stops_it(scheduled):
 
 
 def test_the_health_report_counts_in_english(scheduled):
-    """One schedule is not '1 schedules', and one minute is not '1 minutes'.
+    """One schedule is not '1 schedules', and one second is not '1 seconds'.
     The same class of slip that shipped in a sibling project."""
     repo, spec = scheduled
     now = time.time()
     with Scheduler(repo) as scheduler:
         scheduler.add(spec, every_seconds=3600, now=now)
         scheduler.tick(now=now)
-    summary = doctor(repo, now=now + 60).summary()
-    assert "1 minute ago" in summary
-    assert "1 minutes" not in summary
+
+    assert "1 second ago" in doctor(repo, now=now + 1).summary()
+    assert "1 minutes" not in doctor(repo, now=now + 60).summary()
+
+    # And on the other side of the liveness threshold, where the sentence
+    # counts schedules as well as time.
+    dead = doctor(repo, now=now + 4 * 3600).summary()
+    assert "1 of 1 schedule is overdue" in dead
+    assert "schedules is" not in dead
+
+
+def test_a_fresh_tick_is_not_reported_as_zero_minutes_ago(scheduled):
+    """`last tick 0 minutes ago` printed one line above `0 seconds ago` from
+    the report -- two wordings of the same number, and the summary's reads
+    like the clock has stopped."""
+    repo, _ = scheduled
+    with Scheduler(repo) as scheduler:
+        scheduler.record_tick(now=time.time())
+    summary = doctor(repo).summary()
+    assert "0 minutes ago" not in summary
+    assert "second" in summary
+
+
+def test_a_long_gap_is_still_reported_in_minutes(scheduled):
+    repo, _ = scheduled
+    now = time.time()
+    with Scheduler(repo) as scheduler:
+        scheduler.record_tick(now=now - 3 * 3600)
+    assert "180 minutes ago" in doctor(repo, now=now).summary()

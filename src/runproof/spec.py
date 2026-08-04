@@ -397,9 +397,10 @@ def _parse_checks(raw, where: str) -> tuple[Check, ...]:
             raise SpecError(f"{where}: unknown check {kind!r}. Known checks: {known}")
         if kind in ("must_not_touch", "must_touch") and not isinstance(value, list):
             raise SpecError(f"{where}: {kind!r} takes a list of path patterns")
-        if kind in ("changed_files", "diff_lines"):
-            if not isinstance(value, dict) or not {"min", "max"} & set(value):
-                raise SpecError(f"{where}: {kind!r} takes {{min: N}} or {{max: N}}")
+        if kind in ("changed_files", "diff_lines") and (
+            not isinstance(value, dict) or not {"min", "max"} & set(value)
+        ):
+            raise SpecError(f"{where}: {kind!r} takes {{min: N}} or {{max: N}}")
         checks.append(Check(kind, value))
     return tuple(checks)
 

@@ -57,9 +57,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("spec", help="path to a job spec (YAML)")
     run.add_argument("--attempts", type=int, help="override the spec's attempt count")
 
-    sub.add_parser("status", help="recent runs").add_argument(
-        "--limit", type=int, default=15
-    )
+    sub.add_parser("status", help="recent runs").add_argument("--limit", type=int, default=15)
     sub.add_parser("doctor", help="is the scheduler alive, and what is late")
     sub.add_parser("tick", help="dispatch anything due (point cron at this)")
 
@@ -153,9 +151,7 @@ def _dispatch(args, root: str, style: dict) -> int:
             attempts = store.attempts(run.id)
             payload = {
                 **run.as_dict(),
-                "attempts": [
-                    {**a.as_dict(), "checks": store.checks(a.id)} for a in attempts
-                ],
+                "attempts": [{**a.as_dict(), "checks": store.checks(a.id)} for a in attempts],
             }
         if args.json:
             print(json.dumps(payload, indent=2, default=str))

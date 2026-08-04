@@ -1,0 +1,28 @@
+# A job to leave on a timer:
+#
+#     runproof schedule add examples/nightly.yaml --every 86400
+#     # then, in cron:
+#     */10 * * * * cd /path/to/repo && runproof tick
+#
+# Nothing dispatches until something calls `runproof tick`. That is deliberate
+# -- a daemon that owns its own wake-up is a daemon that can die quietly, and
+# this package exists because one did. Borrowing cron's reliability also
+# borrows its visibility.
+#
+# In the morning: `runproof doctor`. It exits non-zero if the dispatcher is
+# dead or a run went quiet, so it works as a one-line monitoring check.
+name: nightly-typing
+prompt: |
+  Add type annotations to one un-annotated module in `src/`, chosen by
+  whichever has the most public functions without them. Do not change
+  behaviour, and do not add a runtime dependency.
+adapter: claude
+attempts: 1
+checks:
+  - run: python -m pytest -q
+  - run: python -m mypy src
+  - changed_files: {min: 1, max: 2}
+  - diff_lines: {max: 250}
+  - must_not_touch: ["*.lock", ".github/**", "pyproject.toml"]
+limits:
+  wall_seconds: 2400

@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is not decoration here. This package spawns git, spawns
+        # shells, joins paths, and prints drawing characters to a console --
+        # four things that behave differently there, and the fourth one fails
+        # silently by substituting `?`.
+        include:
+          - { os: ubuntu-latest, python: "3.9" }
+          - { os: ubuntu-latest, python: "3.10" }
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.9" }
+          - { os: windows-latest, python: "3.13" }
+          - { os: macos-latest, python: "3.13" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # The tests create their own repositories and commit inside them, so git
+      # needs an identity. Without this the suite fails on a fresh runner with
+      # an error about `user.email` that has nothing to do with the code.
+      - name: Give git an identity to commit with
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+
+      # Only pytest. The package has no dependencies, and installing it would
+      # hide an accidental one.
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pytest -q
+
+  end-to-end:
+    name: The gate holds against a real repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install .
+
+      # A unit test can only prove the pieces agree with each other. This
+      # checks the two claims the README actually makes, from the outside,
+      # against a repository assembled on disk and the installed console
+      # script: that work which breaks the suite is rejected with exit 1, and
+      # that a rejected run leaves the user's checkout untouched.
+      - name: Build a repository with a passing suite
+        run: |
+          mkdir -p demo
+          cd demo
+          git init -q
+          printf 'def add(a, b):\n    return a + b\n' > app.py
+          printf 'from app import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n' > test_app.py
+          printf '.runproof/\n' > .gitignore
+          git add -A
+          git commit -qm initial
+          git rev-parse HEAD > ../before.sha
+
+      - name: Work that breaks the suite is rejected, with exit 1
+        run: |
+          cat > demo/break.yaml <<'YAML'
+          name: break-tests
+          prompt: python -c "import io; io.open('app.py','w').write('def add(a, b): return a * b' + chr(10))"
+          adapter: shell
+          checks:
+            - run: python -m pytest -q
+            - changed_files: {max: 3}
+          YAML
+          set +e
+          runproof -C demo --no-color run demo/break.yaml | tee rejected.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          # 1, not 2: the tool did exactly what it was asked. Collapsing these
+          # would make every rejected agent run look like a crashed tool.
+          test "$code" -eq 1 || { echo "expected exit 1, got $code"; exit 1; }
+          grep -q "test_add" rejected.txt || { echo "the report did not name the failing test"; exit 1; }
+          grep -q "Nothing was merged" rejected.txt || exit 1
+
+      - name: The rejected work did not reach the checkout
+        run: |
+          cd demo
+          # The whole promise of the worktree. If this ever fails, the tool is
+          # doing the single most destructive thing it could do.
+          git diff --quiet || { echo "the working tree was modified"; exit 1; }
+          test "$(git rev-parse HEAD)" = "$(cat ../before.sha)" || { echo "HEAD moved"; exit 1; }
+          test "$(python -c "import app; print(app.add(1, 2))")" = "3" || exit 1
+          # ...and the evidence survived, on its own branch.
+          git branch --list 'runproof/break-tests-*' | grep -q runproof || {
+            echo "the rejected attempt left no branch to inspect"; exit 1; }
+
+      - name: Work that passes is accepted, with exit 0
+        run: |
+          cat > demo/good.yaml <<'YAML'
+          name: add-subtract
+          prompt: python -c "import io; io.open('app.py','a').write(chr(10) + 'def sub(a, b):' + chr(10) + '    return a - b' + chr(10))"
+          adapter: shell
+          checks:
+            - run: python -m pytest -q
+            - must_touch: ["app.py"]
+            - changed_files: {max: 3}
+          YAML
+          runproof -C demo --no-color run demo/good.yaml
+          cd demo
+          # Accepted, and still not merged. That is the design, not an omission.
+          git diff --quiet || exit 1
+          test "$(git rev-parse HEAD)" = "$(cat ../before.sha)" || exit 1
+          git log --oneline "$(git branch --list 'runproof/add-subtract-*' | tr -d ' *')" \
+            | grep -q "runproof: add-subtract" || exit 1
+
+      - name: A dead scheduler is visible, and doctor says so
+        run: |
+          cd demo
+          set +e
+          runproof --no-color doctor | tee ../doctor.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          # Never ticked, so: not alive, and a non-zero exit that a monitoring
+          # job can act on. A green doctor here would mean the one question
+          # this package exists to answer is being answered wrongly.
+          test "$code" -ne 0 || { echo "doctor exited 0 with no dispatcher"; exit 1; }
+          grep -q "never ticked" ../doctor.txt || exit 1
+          runproof --no-color tick
+          runproof --no-color doctor | grep -q "alive" || exit 1
+
+  readme:
+    name: README figures are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+      - run: python -m pip install --upgrade pip pillow pytest
+      # Fails if a verdict or a number in the README no longer matches what
+      # the code produces. A README quoting a result the tool stopped
+      # producing is the exact failure this project argues against.
+      - run: python docs/build_docs.py --check
+
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip ruff
+      - run: ruff check src tests docs
+      - run: ruff format --check src tests docs
+
+  build:
+    name: Package builds and is publishable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m build
+      - run: python -m twine check --strict dist/*

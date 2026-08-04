@@ -180,3 +180,23 @@ def test_a_job_serialises_for_the_store():
     payload = parse_job(MINIMAL).as_dict()
     assert payload["name"] == "demo"
     assert payload["checks"] == [{"kind": "run", "value": "pytest"}]
+
+
+def test_every_shipped_example_parses():
+    """The examples are the first thing anybody copies.
+
+    A broken one is worse than no example: it teaches a syntax the parser
+    refuses, and it does so at the moment somebody is deciding whether the
+    tool is worth their evening. This also keeps the restricted YAML subset
+    honest -- the examples use comments, block scalars, inline mappings and
+    inline sequences, so a regression in any of them fails here.
+    """
+    import glob
+    import os
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    paths = sorted(glob.glob(os.path.join(root, "examples", "*.yaml")))
+    assert paths, "examples/ is empty; the README points at it"
+    for path in paths:
+        job = load_job(path)
+        assert job.checks, f"{os.path.basename(path)} declares no checks"

@@ -220,13 +220,13 @@ class Store:
     # -- lifecycle ---------------------------------------------------------
 
     @classmethod
-    def for_repository(cls, root: str) -> "Store":
+    def for_repository(cls, root: str) -> Store:
         return cls(os.path.join(root, ".runproof", "runs.db"))
 
     def close(self) -> None:
         self._connection.close()
 
-    def __enter__(self) -> "Store":
+    def __enter__(self) -> Store:
         return self
 
     def __exit__(self, *_) -> None:
@@ -277,8 +277,7 @@ class Store:
             raise StoreError(f"{state!r} is not a final state: {', '.join(FINAL_STATES)}")
         now = time.time() if now is None else now
         self._connection.execute(
-            "UPDATE runs SET state = ?, finished_at = ?, heartbeat = ?, detail = ?"
-            " WHERE id = ?",
+            "UPDATE runs SET state = ?, finished_at = ?, heartbeat = ?, detail = ? WHERE id = ?",
             (state, now, now, detail, run_id),
         )
         self._connection.commit()
@@ -286,8 +285,7 @@ class Store:
     def start_attempt(self, run_id: int, ordinal: int, now=None) -> int:
         now = time.time() if now is None else now
         cursor = self._connection.execute(
-            "INSERT INTO attempts (run_id, ordinal, state, started_at)"
-            " VALUES (?, ?, 'running', ?)",
+            "INSERT INTO attempts (run_id, ordinal, state, started_at) VALUES (?, ?, 'running', ?)",
             (run_id, ordinal, now),
         )
         self._connection.commit()
@@ -331,9 +329,7 @@ class Store:
         )
         self._connection.commit()
 
-    def record_check(
-        self, attempt_id: int, kind: str, passed: bool, detail: str, now=None
-    ) -> None:
+    def record_check(self, attempt_id: int, kind: str, passed: bool, detail: str, now=None) -> None:
         """Store one check result, with its detail quoted rather than summarised.
 
         `detail` is the failing test name, the offending path, the actual
@@ -420,7 +416,9 @@ class Store:
             "SELECT kind, passed, detail FROM check_results WHERE attempt_id = ? ORDER BY id",
             (attempt_id,),
         )
-        return [{"kind": r["kind"], "passed": bool(r["passed"]), "detail": r["detail"]} for r in rows]
+        return [
+            {"kind": r["kind"], "passed": bool(r["passed"]), "detail": r["detail"]} for r in rows
+        ]
 
     def pass_rate(self, job: str) -> tuple[int, int]:
         """``(passed, total)`` attempts across every run of ``job``.

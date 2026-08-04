@@ -102,8 +102,7 @@ def render_run(outcome, *, colour: bool = True, unicode_ok: bool = True) -> str:
 
     for attempt in outcome.attempts:
         head = (
-            f"  {ink.mark(attempt.passed)} attempt {attempt.ordinal}"
-            f"  {attempt.wall_seconds:.1f}s"
+            f"  {ink.mark(attempt.passed)} attempt {attempt.ordinal}  {attempt.wall_seconds:.1f}s"
         )
         if attempt.branch:
             head += ink(f"  {attempt.branch}", "cyan")
@@ -135,9 +134,7 @@ def render_run(outcome, *, colour: bool = True, unicode_ok: bool = True) -> str:
 
     if not outcome.passed:
         lines.append("")
-        lines.append(
-            ink("  Nothing was merged. Each attempt is on its own branch above,", "dim")
-        )
+        lines.append(ink("  Nothing was merged. Each attempt is on its own branch above,", "dim"))
         lines.append(ink("  still checked out-able, so you can see what it did.", "dim"))
     lines.append("")
     return "\n".join(lines)

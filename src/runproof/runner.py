@@ -91,7 +91,11 @@ class RunOutcome:
         if self.passed_count == 0:
             first = self.attempts[0]
             why = first.error or (first.verdict.summary() if first.verdict else "unknown")
-            return f"0 of {len(self.attempts)} attempts passed: {why}"
+            # "0 of 1 attempts passed" is the same plural slip as the pass
+            # side, and it reads as a tally when there is nothing to tally.
+            if len(self.attempts) == 1:
+                return f"the single attempt was rejected: {why}"
+            return f"none of {len(self.attempts)} attempts passed: {why}"
         return (
             f"{self.rate} attempts passed -- the job succeeds sometimes, "
             "which is not the same as working"

@@ -1,0 +1,18 @@
+# No agent, no API key, no cost. `adapter: shell` runs the prompt as a shell
+# command, which makes every mechanical change -- codemods, formatters,
+# migration scripts -- eligible for the same treatment: run it in an isolated
+# worktree, prove nothing broke, keep the branch.
+#
+# It is also how the whole pipeline is tested. Every test in this package uses
+# this adapter.
+name: format-and-prove
+prompt: python -m ruff format src tests
+adapter: shell
+checks:
+  - run: python -m pytest -q
+  - run: python -m ruff check src tests
+  # A formatter that touched a lockfile or a workflow has done something other
+  # than formatting.
+  - must_not_touch: ["*.lock", ".github/**"]
+limits:
+  wall_seconds: 300

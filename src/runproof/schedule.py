@@ -102,6 +102,19 @@ class Health:
     def _plural(count: int, word: str) -> str:
         return f"{count} {word}" + ("" if count == 1 else "s")
 
+    @classmethod
+    def _ago(cls, seconds: float) -> str:
+        """How long ago, in a unit that is not absurd for the interval.
+
+        Rounding everything to minutes printed `last tick 0 minutes ago`
+        immediately after a tick, one line above `last tick 0 seconds ago`
+        from the report. Two different wordings for the same number, and the
+        one in the summary reads like the clock has stopped.
+        """
+        if seconds < 90:
+            return cls._plural(round(seconds), "second") + " ago"
+        return cls._plural(round(seconds / 60), "minute") + " ago"
+
     def summary(self) -> str:
         if self.last_tick is None:
             return (
@@ -113,7 +126,7 @@ class Health:
                 "the newest tick is stamped in the future, so liveness cannot "
                 "be judged from it. Check the system clock."
             )
-        ago = self._plural(round(self.seconds_since_tick / 60), "minute") + " ago"
+        ago = self._ago(self.seconds_since_tick)
         late = len(self.overdue)
         verb = "is" if late == 1 else "are"
         if not self.alive:
@@ -156,7 +169,7 @@ class Scheduler:
         if self._owned:
             self.store.close()
 
-    def __enter__(self) -> "Scheduler":
+    def __enter__(self) -> Scheduler:
         return self
 
     def __exit__(self, *_) -> None:
@@ -209,9 +222,7 @@ class Scheduler:
         )
 
     def get(self, job: str) -> Schedule | None:
-        row = self._connection.execute(
-            "SELECT * FROM schedules WHERE job = ?", (job,)
-        ).fetchone()
+        row = self._connection.execute("SELECT * FROM schedules WHERE job = ?", (job,)).fetchone()
         return self._schedule(row) if row else None
 
     def all(self) -> list[Schedule]:

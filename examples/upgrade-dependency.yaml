@@ -1,0 +1,27 @@
+# The job this tool was designed around: a change that is mechanical to
+# describe, tedious to do, and impossible to trust without running the suite.
+#
+#     runproof run examples/upgrade-dependency.yaml
+#
+# `attempts: 3` is the important line. Agents are stochastic, so one green run
+# is weak evidence; three runs report a rate, and "2/3 passed" is a different
+# fact from "it works" that should lead to a different decision.
+name: upgrade-requests
+prompt: |
+  Upgrade the `requests` dependency to the latest 2.x release and fix any
+  breakage that causes.
+
+  The lockfile is generated -- do not edit it by hand. If the upgrade needs a
+  regenerated lockfile, say so in your summary and leave it alone.
+adapter: claude
+attempts: 3
+checks:
+  - run: python -m pytest -q
+  - run: python -m ruff check src
+  - changed_files: {max: 12}
+  - diff_lines: {max: 400}
+  # An agent that cannot make the tests pass will eventually try to stop them
+  # running. Both of these have happened.
+  - must_not_touch: ["*.lock", ".github/**", "conftest.py"]
+limits:
+  wall_seconds: 1800
