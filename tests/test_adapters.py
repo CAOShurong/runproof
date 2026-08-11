@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -42,6 +43,7 @@ def test_codex_explicitly_uses_the_workspace_write_sandbox():
     assert command[-1] == "-", "the untrusted task should be read from stdin"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="exercises Windows .CMD shim resolution")
 def test_claude_prompt_is_piped_and_a_windows_cmd_shim_is_resolved_without_a_shell(
     monkeypatch, tmp_path
 ):
@@ -76,6 +78,7 @@ def test_claude_prompt_is_piped_and_a_windows_cmd_shim_is_resolved_without_a_she
     assert prompt not in " ".join(captured["command"])
 
 
+@pytest.mark.skipif(os.name != "nt", reason="executes a Windows .CMD shim fixture")
 def test_windows_npm_shim_with_spaces_resolves_without_a_shell(tmp_path):
     shim_dir = tmp_path / "tool with spaces"
     shim_dir.mkdir()
