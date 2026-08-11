@@ -75,10 +75,32 @@ class SpecError(ValueError):
 # The YAML subset
 # --------------------------------------------------------------------------
 
-_KEY = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?P<rest>.*)$")
-_ITEM = re.compile(r"^-\s*(?P<rest>.*)$")
-_INLINE_MAP = re.compile(r"^\{(?P<body>.*)\}$")
-_INLINE_SEQ = re.compile(r"^\[(?P<body>.*)\]$")
+_KEY_INITIAL = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
+_KEY_CONTINUATION = _KEY_INITIAL | frozenset("0123456789-")
+
+
+def _mapping_entry(text: str) -> tuple[str, str] | None:
+    """Split ``key: value`` without overlapping regular-expression repeats."""
+    raw_key, separator, rest = text.partition(":")
+    if not separator:
+        return None
+    key = raw_key.rstrip()
+    if (
+        not key
+        or key[0] not in _KEY_INITIAL
+        or any(char not in _KEY_CONTINUATION for char in key[1:])
+    ):
+        return None
+    return key, rest.lstrip()
+
+
+def _sequence_item(text: str) -> str | None:
+    """Return the content after a YAML-subset list marker, if present."""
+    return text[1:].lstrip() if text.startswith("-") else None
+
+
+def _ascii_digits(text: str) -> bool:
+    return bool(text) and all("0" <= char <= "9" for char in text)
 
 
 def _scalar(raw: str, line: int):
@@ -95,9 +117,11 @@ def _scalar(raw: str, line: int):
         return False
     if lowered in ("null", "~"):
         return None
-    if re.fullmatch(r"-?\d+", text):
+    unsigned = text[1:] if text.startswith("-") else text
+    if _ascii_digits(unsigned):
         return int(text)
-    if re.fullmatch(r"-?\d+\.\d+", text):
+    whole, point, fraction = unsigned.partition(".")
+    if point and _ascii_digits(whole) and _ascii_digits(fraction):
         return float(text)
     if text.startswith(("&", "*", "!", "%", "@", "`")):
         # Anchors, aliases, tags and directives. Supporting them badly is
@@ -142,18 +166,16 @@ def _split_commas(body: str, line: int) -> list[str]:
 
 def _inline(text: str, line: int):
     """An inline ``{a: 1}`` mapping or ``[a, b]`` sequence."""
-    mapping = _INLINE_MAP.match(text)
-    if mapping:
+    if text.startswith("{") and text.endswith("}"):
         result = {}
-        for part in _split_commas(mapping.group("body"), line):
+        for part in _split_commas(text[1:-1], line):
             if ":" not in part:
                 raise SpecError(f"inline mapping entry has no colon: {part.strip()!r}", line)
             key, _, value = part.partition(":")
             result[key.strip()] = _value(value.strip(), line)
         return result
-    sequence = _INLINE_SEQ.match(text)
-    if sequence:
-        return [_value(p.strip(), line) for p in _split_commas(sequence.group("body"), line)]
+    if text.startswith("[") and text.endswith("]"):
+        return [_value(p.strip(), line) for p in _split_commas(text[1:-1], line)]
     return None
 
 
@@ -200,7 +222,7 @@ def parse_yaml(text: str):
 def _parse_block(lines, index: int, indent: int):
     if index >= len(lines):
         return None, index
-    if _ITEM.match(lines[index][2]):
+    if _sequence_item(lines[index][2]) is not None:
         return _parse_sequence(lines, index, indent)
     return _parse_mapping(lines, index, indent)
 
@@ -211,17 +233,17 @@ def _parse_sequence(lines, index: int, indent: int):
         number, own_indent, content = lines[index]
         if own_indent < indent:
             break
-        item = _ITEM.match(content)
-        if not item:
+        rest = _sequence_item(content)
+        if rest is None:
             if own_indent > indent:
                 raise SpecError("unexpected indentation inside a sequence", number)
             break
-        rest = item.group("rest").strip()
+        rest = rest.strip()
         index += 1
         if not rest:
             nested, index = _parse_block(lines, index, own_indent + 1)
             items.append(nested)
-        elif _KEY.match(rest) and not rest.startswith(("{", "[")):
+        elif _mapping_entry(rest) is not None and not rest.startswith(("{", "[")):
             # `- run: pytest` -- a mapping that begins on the dash line.
             synthetic = [(number, own_indent + 2, rest)]
             while index < len(lines) and lines[index][1] > own_indent:
@@ -256,15 +278,15 @@ def _parse_mapping(lines, index: int, indent: int):
             raise SpecError("unexpected indentation", number)
         elif own_indent < level:
             break
-        match = _KEY.match(content)
-        if not match:
-            if _ITEM.match(content):
+        entry = _mapping_entry(content)
+        if entry is None:
+            if _sequence_item(content) is not None:
                 break
             raise SpecError(f"expected `key: value`, got {content!r}", number)
-        key = match.group("key")
+        key, rest = entry
         if key in result:
             raise SpecError(f"duplicate key {key!r}", number)
-        rest = match.group("rest").strip()
+        rest = rest.strip()
         index += 1
 
         if rest in ("|", "|-", ">"):

@@ -595,8 +595,29 @@ def check_test_count() -> str | None:
     with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as handle:
         readme = handle.read()
 
-    stated = [int(n) for n in re.findall(r"(\d+) tests", readme)]
-    wrong = [str(n) for n in stated if n != actual]
+    # ``(\d+) tests`` looks harmless, but a near-match made from a long run of
+    # digits forces Python's backtracking engine to retry at every position.
+    # Scan for the fixed suffix first, then walk left once through its digits.
+    stated: list[str] = []
+    suffix = " tests"
+    search_from = 0
+    while True:
+        end = readme.find(suffix, search_from)
+        if end < 0:
+            break
+        start = end
+        while start and "0" <= readme[start - 1] <= "9":
+            start -= 1
+        if start < end:
+            stated.append(readme[start:end])
+        search_from = end + len(suffix)
+
+    expected = str(actual)
+    wrong = []
+    for digits in stated:
+        normalized = digits.lstrip("0") or "0"
+        if normalized != expected:
+            wrong.append(normalized if len(normalized) <= 20 else normalized[:20] + "...")
     if wrong:
         return f"README says {', '.join(wrong)} tests; there are {actual}"
     return None
