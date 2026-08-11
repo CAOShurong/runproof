@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-11
+
+### Security
+
+- Replace the YAML-subset parser's overlapping regular-expression repeats with
+  bounded string parsing, removing CodeQL's polynomial-ReDoS findings on job
+  specifications without adding a runtime dependency.
+- Replace the README test-count regular expression with a linear suffix scan. A
+  50,000-digit near-match that previously took more than 25 seconds is covered by
+  a regression test.
+- Pin every GitHub Action in CI and the release pipeline to an immutable commit,
+  including the PyPI publisher and GitHub release action.
+
+### Maintenance
+
+- Add weekly Dependabot updates for pinned GitHub Actions.
+
 ## [0.2.0] - 2026-08-11
 
 ### Security
