@@ -62,6 +62,20 @@ def test_the_pass_rate_is_over_every_attempt_not_the_last_one(repo):
     assert "50%" in page
 
 
+def test_an_adapter_error_is_not_hidden_from_the_pass_rate(repo):
+    run_job(parse_job(spec_text("with-error", APPEND_SUB)), root=repo)
+    run_job(
+        parse_job(spec_text("with-error", "runproof-command-that-does-not-exist")),
+        root=repo,
+    )
+
+    page = render_dashboard(repo)
+
+    assert "1/2" in page
+    assert "50%" in page
+    assert "error" in page
+
+
 def test_quoted_failures_are_escaped(repo):
     """A check's detail is a pytest transcript. `assert 2 == 3` is harmless;
     the same field carrying `<` from a diff or a type name is not."""

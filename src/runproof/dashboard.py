@@ -133,7 +133,12 @@ def _strip(states: list) -> str:
     """
     if not states:
         return '<span class="muted">no attempts yet</span>'
-    colours = {"passed": "#7cc48c", "rejected": "#e8765c", "failed": "#e8765c"}
+    colours = {
+        "passed": "#7cc48c",
+        "rejected": "#e8765c",
+        "failed": "#e8765c",
+        "error": "#e8765c",
+    }
     ticks = "".join(
         f'<i style="background:{colours.get(state, "#5a6072")}" title="{_e(state)}"></i>'
         for state in states[-STRIP:]

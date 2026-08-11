@@ -15,6 +15,7 @@ import os
 import pytest
 
 from conftest import APPEND_SUB, BREAK_TESTS, TOUCH_CI, git, spec_text
+from runproof.adapters import AdapterResult
 from runproof.runner import run_job
 from runproof.spec import parse_job
 from runproof.store import Store
@@ -192,6 +193,21 @@ def test_a_broken_job_is_not_accepted(repo):
     assert "test_add" in outcome.attempts[0].verdict.summary()
 
 
+def test_an_adapter_failure_cannot_be_accepted_by_green_checks(repo):
+    """An expired login or missing command can leave the unchanged suite green.
+
+    Adapter completion is therefore a prerequisite for acceptance, not another
+    claim that the repository's checks can accidentally paper over.
+    """
+    job = parse_job(spec_text("agent-failed", "runproof-command-that-does-not-exist"))
+    outcome = run_job(job, root=repo)
+
+    assert outcome.state == "error"
+    assert outcome.passed is False
+    assert outcome.attempts[0].error
+    assert outcome.attempts[0].verdict.passed, "the regression requires green repo checks"
+
+
 def test_a_partial_pass_rate_is_reported_as_such(repo):
     """Agents are stochastic. Reporting the last attempt turns a coin flip
     into a fact, so the rate is the headline."""
@@ -204,7 +220,30 @@ def test_a_partial_pass_rate_is_reported_as_such(repo):
         AttemptOutcome(3, True, "b3", None, None, 1.0),
     ]
     assert outcome.rate == "2/3"
+    assert outcome.passed is False
     assert "not the same as working" in outcome.summary()
+
+
+def test_one_adapter_error_makes_a_multi_attempt_run_incomplete(repo, monkeypatch):
+    class OneSuccessThenError:
+        calls = 0
+
+        def run(self, worktree, job, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                return AdapterResult(True, summary="completed")
+            return AdapterResult(False, detail="authentication expired")
+
+    adapter = OneSuccessThenError()
+    monkeypatch.setattr("runproof.runner.get_adapter", lambda _name: adapter)
+    job = parse_job(spec_text("mixed-infrastructure", 'python -c "pass"', attempts=2))
+
+    outcome = run_job(job, root=repo)
+
+    assert outcome.rate == "1/2"
+    assert outcome.passed is False
+    assert outcome.state == "error"
+    assert "1 could not complete" in outcome.summary()
 
 
 def test_everything_is_recorded_even_for_a_failure(repo):

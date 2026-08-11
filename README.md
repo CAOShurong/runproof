@@ -51,6 +51,12 @@ pip install runproof
 No dependencies. Python 3.9+. `git` must be on PATH — isolation is the feature,
 not a nicety, so runproof refuses to start without it.
 
+> [!IMPORTANT]
+> RunProof isolates changes in a Git worktree; it does not isolate your host.
+> Versions before 0.2.0 also used unsafe unattended-agent defaults. Upgrade and
+> read the [security boundary](SECURITY.md) before running agents against an
+> untrusted repository or job specification.
+
 ## The 60-second version
 
 ```yaml
@@ -186,10 +192,12 @@ supported and tested, or a `SpecError` naming the line. That buys zero runtime
 dependencies for a file format that is, in practice, a dozen lines of mapping.
 For anything larger it would be the wrong trade.
 
-**It does not sandbox the agent.** A worktree is isolation from *your working
-tree*, not from your machine. The agent runs with your permissions and can
-reach the network. If that matters, run runproof inside the container you were
-going to use anyway.
+**Its built-in restrictions are not a host security boundary.** A worktree
+isolates changes from *your working tree*. The Claude adapter additionally uses
+fail-closed repository read/edit permissions, and the Codex adapter requests its
+`workspace-write` sandbox. Neither protects every secret, process, repository,
+tool, or network resource available to your account. Use a disposable container
+or virtual machine for hostile code, and review [`SECURITY.md`](SECURITY.md).
 
 **It has no daemon.** `runproof tick` is the entire scheduler, and something
 else must call it — cron, a systemd timer, Task Scheduler, a loop in a
@@ -343,9 +351,9 @@ What it shows, and why each part is there:
 
 | `adapter:` | what it drives |
 | --- | --- |
-| `claude` | the `claude` CLI in headless print mode (`-p`, `--output-format json`) |
-| `codex` | the `codex` CLI (`codex exec`) |
-| `shell` | the prompt, as a shell command |
+| `claude` | headless Claude Code with fail-closed repository read/edit permissions; inherited settings, browser integration, and slash skills disabled |
+| `codex` | `codex exec` with `workspace-write`, an ephemeral session, and user config/rules ignored |
+| `shell` | the prompt as a trusted shell command; the spec is executable code |
 
 The core treats all three as "something that edits a worktree", so **comparing
 two agents on the same job is a configuration change, not a fork**. The gate
@@ -357,11 +365,11 @@ same *change the tree, then prove nothing broke* treatment, and it makes the
 whole pipeline testable with no agent, no API key and no cost. Every test in
 this package uses it.
 
-The `claude` adapter defaults to `--permission-mode bypassPermissions`, which
-is a real decision: an unattended run cannot answer a prompt, so anything less
-means the agent stalls forever on the first edit. It is safe *because* of the
-worktree — the agent has write access to a throwaway checkout, not to your
-tree.
+The adapters default to the narrowest unattended modes that can edit the
+worktree without stopping for a prompt. They pass the task over standard input
+and do not invoke a Windows command shell to launch npm shims. An authentication
+error, timeout, crash, or non-zero adapter exit is always an error: green checks
+on an unchanged repository cannot rescue a failed agent process.
 
 ## Exit codes
 
@@ -369,7 +377,7 @@ tree.
 | --- | --- |
 | `0` | accepted — every attempt that was required passed its checks |
 | `1` | ran fine, the work was not acceptable |
-| `2` | could not run at all — bad spec, no repository, no git |
+| `2` | could not complete — bad spec, missing repository/tool, authentication error, timeout, or crashed adapter |
 
 The middle one is the interesting case. A job whose agent produced work that
 failed the checks is *not* an error; the tool did exactly what it was asked.
@@ -425,7 +433,7 @@ python -m pip install -e ".[dev]"
 python -m pytest -q
 ```
 
-87 tests. They are weighted at refusals — a spec that cannot be judged, a
+90+ tests. They are weighted at refusals — a spec that cannot be judged, a
 worktree that cannot be obtained, a scheduler that is lying about being alive —
 and at everything a real run has actually broken. Several are named after the
 bug they exist to prevent, because the bug is more informative than the

@@ -430,7 +430,7 @@ class Store:
             "SELECT COUNT(*) AS total,"
             " SUM(CASE WHEN a.state = 'passed' THEN 1 ELSE 0 END) AS passed"
             " FROM attempts a JOIN runs r ON r.id = a.run_id"
-            " WHERE r.job = ? AND a.state IN ('passed', 'failed', 'rejected')",
+            " WHERE r.job = ? AND a.state IN ('passed', 'failed', 'rejected', 'error')",
             (job,),
         ).fetchone()
         return int(row["passed"] or 0), int(row["total"] or 0)

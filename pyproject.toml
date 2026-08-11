@@ -54,6 +54,7 @@ Homepage = "https://github.com/CAOShurong/runproof"
 Repository = "https://github.com/CAOShurong/runproof"
 Issues = "https://github.com/CAOShurong/runproof/issues"
 Changelog = "https://github.com/CAOShurong/runproof/blob/main/CHANGELOG.md"
+Security = "https://github.com/CAOShurong/runproof/security/policy"
 
 [project.scripts]
 runproof = "runproof.cli:main"
@@ -71,7 +72,16 @@ path = "src/runproof/__init__.py"
 packages = ["src/runproof"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "docs", "examples", "README.md", "LICENSE", "CHANGELOG.md"]
+include = [
+    "src",
+    "tests",
+    "docs",
+    "examples",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

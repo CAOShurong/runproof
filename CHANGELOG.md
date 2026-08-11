@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-11
+
+### Security
+
+- Replace Claude Code's `bypassPermissions` default with fail-closed `dontAsk`
+  permissions, a fixed repository-scoped read/edit tool surface, disabled settings
+  inheritance, strict MCP configuration, no session persistence, no browser
+  integration, and no slash-command skills.
+- Run Codex with an explicit `workspace-write` sandbox and ephemeral session while
+  ignoring user configuration and execution-policy rules.
+- Pass agent tasks through standard input and resolve Windows npm command shims to
+  their native executable without `cmd.exe`, preventing task text or arguments from
+  becoming shell syntax.
+
+### Fixed
+
+- Treat a failed, timed-out, or unauthenticated adapter process as an error even if
+  the unchanged repository still passes every declared check.
+- Require every requested attempt to pass before the run returns success; a partial
+  pass rate remains evidence of stochastic behavior, not an accepted run.
+- Preserve the verifier's evidence after an adapter error while returning exit code
+  `2`, so automation can distinguish infrastructure failure from rejected work.
+- Include errored attempts in dashboard pass-rate totals instead of silently
+  dropping unavailable or crashed runs from the denominator.
+
+### Documentation
+
+- Document the worktree, host-sandbox, executable-spec, and hostile-repository
+  boundaries in `SECURITY.md` and the README.
+
 ## [0.1.0] — 2026-08-04
 
 First release.

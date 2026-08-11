@@ -41,6 +41,12 @@ __all__ = ["main"]
 EXIT_OK, EXIT_REJECTED, EXIT_ERROR = 0, 1, 2
 
 
+def _outcome_exit_code(outcome) -> int:
+    if outcome.passed:
+        return EXIT_OK
+    return EXIT_ERROR if outcome.state == "error" else EXIT_REJECTED
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="runproof",
@@ -115,7 +121,7 @@ def _dispatch(args, root: str, style: dict) -> int:
             job = type(job)(**{**job.__dict__, "attempts": args.attempts})
         outcome = run_job(job, root=root)
         _emit(outcome.as_dict(), render_run(outcome, **style), args.json)
-        return EXIT_OK if outcome.passed else EXIT_REJECTED
+        return _outcome_exit_code(outcome)
 
     if args.command == "status":
         with Store.for_repository(root) as store:
@@ -140,7 +146,9 @@ def _dispatch(args, root: str, style: dict) -> int:
         else:
             for outcome in outcomes:
                 print(render_run(outcome, **style))
-        return EXIT_OK if all(o.passed for o in outcomes) else EXIT_REJECTED
+        if any(outcome.state == "error" for outcome in outcomes):
+            return EXIT_ERROR
+        return EXIT_OK if all(outcome.passed for outcome in outcomes) else EXIT_REJECTED
 
     if args.command == "schedule":
         return _schedules(args, root, style)
@@ -160,7 +168,9 @@ def _dispatch(args, root: str, style: dict) -> int:
             print(json.dumps(payload, indent=2, default=str))
         else:
             print(json.dumps(payload, indent=2, default=str))
-        return EXIT_OK if run.state == "passed" else EXIT_REJECTED
+        if run.state == "passed":
+            return EXIT_OK
+        return EXIT_ERROR if run.state == "error" else EXIT_REJECTED
 
     if args.command == "dashboard":
         from .dashboard import build_dashboard
