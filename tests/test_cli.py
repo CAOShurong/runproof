@@ -47,6 +47,16 @@ def test_a_broken_spec_exits_two_rather_than_one(repo, capsys):
     assert "chekcs" in capsys.readouterr().err
 
 
+def test_an_agent_process_failure_exits_two_even_when_repo_checks_pass(repo, capsys):
+    spec = write_spec(repo, "agent-error", "runproof-command-that-does-not-exist")
+
+    assert main(["-C", repo, "--no-color", "run", spec]) == EXIT_ERROR
+    out = capsys.readouterr().out
+    assert "ERROR" in out
+    assert "ERROR attempt" in out
+    assert "exit" in out
+
+
 def test_running_outside_a_repository_exits_two(tmp_path, capsys):
     assert main(["-C", str(tmp_path), "run", "nope.yaml"]) == EXIT_ERROR
     assert "not inside a git repository" in capsys.readouterr().err

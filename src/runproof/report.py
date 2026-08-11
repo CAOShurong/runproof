@@ -97,20 +97,23 @@ def render_run(outcome, *, colour: bool = True, unicode_ok: bool = True) -> str:
     ink = Ink(colour, unicode_ok)
     lines = ["", ink(f"runproof {outcome.job}", "bold") + ink(f"  run {outcome.run_id}", "dim")]
 
-    verdict = ink("PASSED", "bold", "green") if outcome.passed else ink("FAILED", "bold", "red")
+    if outcome.passed:
+        verdict = ink("PASSED", "bold", "green")
+    elif outcome.state == "error":
+        verdict = ink("ERROR", "bold", "red")
+    else:
+        verdict = ink("FAILED", "bold", "red")
     lines.append(f"  {verdict}  {outcome.summary()}")
 
     for attempt in outcome.attempts:
-        head = (
-            f"  {ink.mark(attempt.passed)} attempt {attempt.ordinal}  {attempt.wall_seconds:.1f}s"
-        )
+        marker = ink("ERROR", "bold", "red") if attempt.error else ink.mark(attempt.passed)
+        head = f"  {marker} attempt {attempt.ordinal}  {attempt.wall_seconds:.1f}s"
         if attempt.branch:
             head += ink(f"  {attempt.branch}", "cyan")
         lines.append(head)
 
         if attempt.error:
             lines.append(ink(f"      error: {attempt.error}", "red"))
-            continue
         if not attempt.verdict:
             continue
 

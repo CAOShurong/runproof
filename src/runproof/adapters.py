@@ -22,15 +22,79 @@ up standing in for evidence.
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 __all__ = ["AdapterError", "AdapterResult", "get_adapter"]
 
 
 class AdapterError(RuntimeError):
     """The agent could not be driven at all, so there is nothing to verify."""
+
+
+SAFE_CLAUDE_TOOLS = "Read,Glob,Grep,Edit,Write"
+SAFE_CLAUDE_ALLOW = "Read(/**),Edit(/**)"
+CLAUDE_STDIN_INSTRUCTION = (
+    "Execute the coding task supplied on standard input. Work only inside the current checkout."
+)
+
+
+def _shim_path(value: str, shim: str) -> str:
+    """Expand the two npm spellings for the directory containing a shim."""
+    base = str(Path(shim).parent) + os.sep
+    value = re.sub(r"%~dp0", lambda _: base, value, flags=re.IGNORECASE)
+    value = re.sub(r"%dp0%", lambda _: base, value, flags=re.IGNORECASE)
+    return os.path.normpath(os.path.expandvars(value))
+
+
+def _resolve_windows_shim(shim: str) -> list[str]:
+    """Resolve an npm ``.CMD`` shim without sending arguments through a shell.
+
+    A shell fallback would make characters such as ``&`` in an otherwise
+    ordinary argument executable. Modern Claude Code shims point directly to a
+    native executable; older npm shims point to a JavaScript entry point. Both
+    shapes can be resolved to a direct ``CreateProcess`` argv. Unknown shapes
+    fail closed instead of guessing at quoting rules.
+    """
+    try:
+        text = Path(shim).read_text(encoding="utf-8", errors="replace")
+    except OSError as error:
+        raise AdapterError(f"cannot read Windows command shim {shim!r}: {error}") from error
+
+    executable_matches = re.findall(r'"([^"\r\n]+\.exe)"', text, flags=re.IGNORECASE)
+    script_matches = re.findall(r'"([^"\r\n]+\.(?:c?js|mjs))"', text, flags=re.IGNORECASE)
+    scripts = [_shim_path(value, shim) for value in script_matches]
+    scripts = [value for value in scripts if os.path.isfile(value)]
+
+    for value in executable_matches:
+        executable = _shim_path(value, shim)
+        if os.path.isfile(executable):
+            if scripts and os.path.basename(executable).lower() in {"node.exe", "node64.exe"}:
+                return [executable, scripts[0]]
+            return [executable]
+
+    if scripts:
+        node = shutil.which("node")
+        if node and not node.lower().endswith((".cmd", ".bat")):
+            return [node, scripts[0]]
+
+    raise AdapterError(
+        f"cannot safely resolve Windows command shim {shim!r}; install a native "
+        "CLI executable or a standard npm shim that points to Node"
+    )
+
+
+def _resolve_cli(name: str) -> list[str]:
+    executable = shutil.which(name)
+    if executable is None:
+        raise AdapterError(f"the `{name}` CLI is not on PATH")
+    if executable.lower().endswith((".cmd", ".bat")):
+        return _resolve_windows_shim(executable)
+    return [executable]
 
 
 @dataclass(frozen=True)
@@ -94,45 +158,60 @@ class ClaudeAdapter:
     unattended. Guessing a CLI's interface and discovering it at 3am is the
     kind of thing this project is supposed to prevent, not commit.
 
-    `bypassPermissions` is the default here and that is a real decision. An
-    unattended run cannot answer a prompt, so anything less means the agent
-    stalls forever on the first edit. It is safe *because* of the worktree:
-    the agent has write access to a throwaway checkout, not to your tree.
+    The default is deliberately fail-closed: ``dontAsk`` plus a fixed set of
+    repository read/edit tools. Anything outside that surface is denied rather
+    than prompting an unattended process or inheriting a broad host allowlist.
+    A worktree protects the caller's checkout from normal edits, but it is not
+    an operating-system sandbox and cannot make bypass mode safe.
     """
 
     name = "claude"
 
-    def __init__(self, model: str | None = None, permission_mode: str = "bypassPermissions"):
+    def __init__(self, model: str | None = None, permission_mode: str = "dontAsk"):
         self.model = model
         self.permission_mode = permission_mode
 
     def available(self) -> bool:
         return shutil.which("claude") is not None
 
-    def _command(self, job) -> list[str]:
+    def _command(self) -> list[str]:
         command = [
             "claude",
             "-p",
-            job.prompt,
+            CLAUDE_STDIN_INSTRUCTION,
             "--output-format",
             "json",
             "--permission-mode",
             self.permission_mode,
+            "--tools",
+            SAFE_CLAUDE_TOOLS,
+            "--allowedTools",
+            SAFE_CLAUDE_ALLOW,
+            "--setting-sources=",
+            "--strict-mcp-config",
+            "--no-session-persistence",
+            "--no-chrome",
+            "--disable-slash-commands",
         ]
         if self.model:
             command += ["--model", self.model]
         return command
 
     def run(self, worktree, job, timeout: int) -> AdapterResult:
-        if not self.available():
+        try:
+            command_prefix = _resolve_cli("claude")
+        except AdapterError as error:
             raise AdapterError(
-                "the `claude` CLI is not on PATH. Install it, or use "
+                f"{error}. Install a supported Claude Code CLI, or use "
                 "`adapter: shell` for a job that does not need an agent."
-            )
+            ) from error
+        logical_command = self._command()
+        command = [*command_prefix, *logical_command[1:]]
         try:
             result = subprocess.run(
-                self._command(job),
+                command,
                 cwd=worktree.path,
+                input=job.prompt,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -205,13 +284,27 @@ class CodexAdapter:
     def available(self) -> bool:
         return shutil.which("codex") is not None
 
+    def _command(self) -> list[str]:
+        return [
+            "codex",
+            "exec",
+            "--sandbox",
+            "workspace-write",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "-",
+        ]
+
     def run(self, worktree, job, timeout: int) -> AdapterResult:
-        if not self.available():
-            raise AdapterError("the `codex` CLI is not on PATH")
+        command_prefix = _resolve_cli("codex")
+        logical_command = self._command()
+        command = [*command_prefix, *logical_command[1:]]
         try:
             result = subprocess.run(
-                ["codex", "exec", job.prompt],
+                command,
                 cwd=worktree.path,
+                input=job.prompt,
                 capture_output=True,
                 text=True,
                 timeout=timeout,

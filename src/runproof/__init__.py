@@ -6,6 +6,6 @@ survives is a branch you can merge. What does not is a report saying exactly
 where it failed.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = ["__version__"]

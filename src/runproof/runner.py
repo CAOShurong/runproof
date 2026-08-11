@@ -6,11 +6,12 @@ the gate does not know what an adapter is, the store does not know what a check
 is -- so what is left here is sequencing and the two decisions that only make
 sense with the whole picture in view.
 
-**A run is `passed` only if an attempt passed.** With `attempts: n`, the run
-reports how many succeeded, and the *rate* is the honest headline. Agents are
-stochastic: one green attempt out of three is not "it works", it is "it works
-sometimes", and those call for different actions. The naive alternative --
-report the last attempt -- turns a coin flip into a fact.
+**A run is `passed` only if every requested attempt passed.** With
+`attempts: n`, the run reports how many succeeded, and the *rate* is the honest
+headline. Agents are stochastic: one green attempt out of three is not "it
+works", it is "it works sometimes", and must not produce a successful process
+exit. The naive alternative -- report the last or best attempt -- turns a coin
+flip into a fact.
 
 **A crash is a state, not an absence.** Every exit path writes a terminal state
 to the store, including the ones nobody plans for. A run that ends without a
@@ -70,8 +71,12 @@ class RunOutcome:
         return sum(1 for a in self.attempts if a.passed)
 
     @property
+    def error_count(self) -> int:
+        return sum(1 for attempt in self.attempts if attempt.error)
+
+    @property
     def passed(self) -> bool:
-        return self.passed_count > 0
+        return bool(self.attempts) and self.passed_count == len(self.attempts)
 
     @property
     def rate(self) -> str:
@@ -81,6 +86,16 @@ class RunOutcome:
     def summary(self) -> str:
         if not self.attempts:
             return "no attempts ran"
+        if self.error_count:
+            first_error = next(attempt.error for attempt in self.attempts if attempt.error)
+            if self.error_count == len(self.attempts):
+                if len(self.attempts) == 1:
+                    return f"the single attempt could not complete: {first_error}"
+                return f"none of {len(self.attempts)} attempts could complete: {first_error}"
+            return (
+                f"{self.rate} attempts passed; {self.error_count} could not complete -- "
+                "the run is incomplete"
+            )
         if self.passed_count == len(self.attempts):
             if len(self.attempts) == 1:
                 # Worth its own sentence rather than "all 1 attempts passed":
@@ -128,6 +143,8 @@ def _one_attempt(job: Job, root: str, ordinal: int, adapter, store: Store, run_i
         result = adapter.run(worktree, job, job.limits.wall_seconds)
         outcome.adapter_result = result
         store.heartbeat(run_id)
+        if not result.ok:
+            outcome.error = result.detail or "adapter process did not complete successfully"
 
         # Verified even when the adapter reported failure. A timed-out or
         # crashed agent still leaves a diff, and whether that diff is
@@ -135,23 +152,28 @@ def _one_attempt(job: Job, root: str, ordinal: int, adapter, store: Store, run_i
         # code does.
         verdict = verify(job, worktree)
         outcome.verdict = verdict
-        outcome.passed = verdict.passed
+        # Green repository checks cannot turn an authentication failure,
+        # timeout, or crashed adapter into accepted work. We still run and
+        # record the checks because the partial diff is useful evidence.
+        outcome.passed = result.ok and verdict.passed
 
         for check in verdict.results:
             store.record_check(attempt_id, check.kind, check.passed, check.detail)
 
-        if verdict.passed:
+        if outcome.passed:
             worktree.commit(f"runproof: {job.name} (attempt {ordinal})")
 
+        attempt_state = "passed" if outcome.passed else ("error" if outcome.error else "rejected")
+        detail = outcome.error or verdict.summary()
         store.finish_attempt(
             attempt_id,
-            "passed" if verdict.passed else "rejected",
+            attempt_state,
             branch=worktree.branch,
             worktree=worktree.path,
             tokens=result.tokens,
             files_changed=verdict.diff.files_changed if verdict.diff else None,
             diff_lines=verdict.diff.lines if verdict.diff else None,
-            detail=verdict.summary(),
+            detail=detail,
         )
     except (WorktreeError, AdapterError) as error:
         outcome.error = str(error)
@@ -180,7 +202,12 @@ def run_job(job: Job, root: str = ".", trigger: str = "manual", store: Store | N
         for ordinal in range(1, job.attempts + 1):
             outcome.attempts.append(_one_attempt(job, root, ordinal, adapter, store, run_id))
             store.heartbeat(run_id)
-        outcome.state = "passed" if outcome.passed else "failed"
+        if any(attempt.error for attempt in outcome.attempts):
+            outcome.state = "error"
+        elif outcome.passed:
+            outcome.state = "passed"
+        else:
+            outcome.state = "failed"
     except BaseException as error:  # noqa: BLE001 - including KeyboardInterrupt
         outcome.state = "error"
         store.finish_run(run_id, "error", f"{type(error).__name__}: {error}")
