@@ -163,7 +163,9 @@ def _matches_any(path: str, patterns) -> str | None:
     one without is matched against the basename as well. Returning *which*
     pattern matched, rather than a boolean, is what lets the report name it.
     """
+    path = path.replace("\\", "/")
     for pattern in patterns:
+        pattern = pattern.replace("\\", "/")
         if fnmatch.fnmatch(path, pattern):
             return pattern
         if "/" not in pattern and fnmatch.fnmatch(os.path.basename(path), pattern):

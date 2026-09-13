@@ -176,6 +176,14 @@ def test_loading_from_disk_reports_the_filename(tmp_path):
         load_job(str(path))
 
 
+def test_a_utf8_bom_does_not_break_the_first_key(tmp_path):
+    path = tmp_path / "job.yaml"
+    path.write_bytes(b"\xef\xbb\xbf" + MINIMAL.encode("utf-8"))
+    job = load_job(str(path))
+    assert job.name == "demo"
+    assert parse_yaml("\ufeff" + MINIMAL)["name"] == "demo"
+
+
 def test_a_job_serialises_for_the_store():
     payload = parse_job(MINIMAL).as_dict()
     assert payload["name"] == "demo"

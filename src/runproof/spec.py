@@ -204,6 +204,8 @@ def parse_yaml(text: str):
     that a job spec can be a dozen readable lines without the package growing
     a dependency, and it fails loudly on everything outside that.
     """
+    if text.startswith("\ufeff"):
+        text = text[1:]
     lines: list[tuple[int, int, str]] = []
     for number, raw in enumerate(text.splitlines(), start=1):
         without_comment = raw
@@ -480,5 +482,5 @@ def parse_job(text: str, source: str = "<memory>") -> Job:
 
 def load_job(path: str) -> Job:
     """Read and validate a job spec from disk."""
-    with open(path, encoding="utf-8") as handle:
+    with open(path, encoding="utf-8-sig") as handle:
         return parse_job(handle.read(), source=os.path.basename(path))

@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Read job specs as UTF-8 with an optional BOM. A Notepad-saved `.yaml` started
+  with `U+FEFF`, so the first key failed to parse and the job never ran.
+- Match `must_not_touch` / `must_touch` patterns against paths with either
+  slash. Git on Windows can report `\` in a diff, which previously missed
+  `.github/**`.
+
 ## [0.2.1] - 2026-08-11
 
 ### Security

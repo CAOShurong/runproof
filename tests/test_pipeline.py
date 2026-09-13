@@ -19,7 +19,7 @@ from runproof.adapters import AdapterResult
 from runproof.runner import run_job
 from runproof.spec import parse_job
 from runproof.store import Store
-from runproof.verify import SUMMARY_DETAIL, Verdict, verify
+from runproof.verify import SUMMARY_DETAIL, Verdict, _matches_any, verify
 from runproof.worktree import Worktree, WorktreeError, repository_root
 
 
@@ -132,6 +132,11 @@ def test_work_that_breaks_the_tests_is_rejected(repo):
     assert failure.kind == "run"
     # The detail must be actionable on its own, not "tests failed".
     assert "test_add" in failure.detail
+
+
+def test_windows_separators_still_match_posix_globs():
+    assert _matches_any(r".github\ci.yml", [".github/**"]) == ".github/**"
+    assert _matches_any(r"src\app.py", ["*.py"]) == "*.py"
 
 
 def test_a_forbidden_path_is_rejected_and_named(repo):

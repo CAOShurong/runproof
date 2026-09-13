@@ -45,7 +45,8 @@ into a fact.
 ## Install
 
 ```bash
-pip install runproof
+uvx runproof run jobs/upgrade-requests.yaml   # nothing installed
+pip install runproof                          # persistent use
 ```
 
 No dependencies. Python 3.9+. `git` must be on PATH — isolation is the feature,
